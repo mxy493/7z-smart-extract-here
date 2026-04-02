@@ -1,0 +1,39 @@
+﻿#include "Resource.h"
+#include <windows.h>
+
+STRINGTABLE
+BEGIN
+    IDS_MENU_TEXT           L"7z智能解压"
+    IDS_MENU_HELP_TEXT      L"解压到当前文件夹或子文件夹"
+    IDS_ERROR_TITLE         L"7z智能解压"
+    IDS_ERROR_7Z_NOT_FOUND  L"未找到 7-Zip，请先安装 7-Zip (https://www.7-zip.org/)"
+    IDS_ERROR_EXTRACT_FAILED L"解压失败"
+    IDS_CONFLICT_TITLE      L"7z智能解压 - 文件冲突"
+    IDS_CONFLICT_MSG        L"以下目标已存在，是否覆盖？\n\n%s"
+END
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     1,0,0,0
+PRODUCTVERSION  1,0,0,0
+FILEFLAGSMASK   0x3fL
+FILEFLAGS       0x0L
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_DLL
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "FileDescription", "7z智能解压右键菜单扩展"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "InternalName", "7zSmartExtractHere"
+            VALUE "ProductName", "7z智能解压"
+            VALUE "ProductVersion", "1.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END
