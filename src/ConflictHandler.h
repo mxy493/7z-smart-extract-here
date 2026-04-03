@@ -25,7 +25,8 @@ public:
 
 private:
     // 计算单个压缩包的解压目标路径
-    static std::wstring ComputeExtractDir(const std::wstring& archivePath);
+    // 返回 {extractDir, needsCheck}，needsCheck=false 表示解压到父目录，无需冲突检测
+    static std::pair<std::wstring, bool> ComputeExtractDir(const std::wstring& archivePath);
 
     // 检查目标路径是否存在
     static bool TargetExists(const std::wstring& extractDir);

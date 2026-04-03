@@ -1,6 +1,7 @@
 #include <cassert>
 #include <iostream>
 #include <string>
+#include <fstream>
 #include <filesystem>
 #include "ArchiveAnalyzer.h"
 
@@ -29,10 +30,75 @@ void test_find_7zg() {
     std::cout << "test_find_7zg: PASS" << std::endl;
 }
 
+void test_tgz_analysis() {
+    std::wstring sevenZip = ArchiveAnalyzer::FindSevenZipPath();
+    if (sevenZip.empty()) {
+        std::cout << "test_tgz_analysis: SKIP (7z not found)" << std::endl;
+        return;
+    }
+
+    // 使用无空格的临时目录
+    std::wstring testDir = L"C:\\temp\\test_tgz_analysis";
+    std::filesystem::create_directories(testDir);
+    std::wstring testFolder = testDir + L"\\mytestfolder";
+    std::filesystem::create_directories(testFolder);
+    {
+        std::ofstream ofs(testFolder + L"\\test.txt");
+        ofs << "hello";
+    }
+
+    std::wstring tarPath = testDir + L"\\mytest.tar";
+    std::wstring tgzPath = testDir + L"\\mytest.tgz";
+
+    // 7z a mytest.tar mytestfolder (在 testDir 下执行)
+    {
+        std::wstring cmd = L"cmd /c \"cd /d \"" + testDir + L"\" && \"" + sevenZip +
+                          L"\" a mytest.tar mytestfolder\"";
+        int r = _wsystem(cmd.c_str());
+        assert(r == 0);
+    }
+
+    // 7z a mytest.tgz mytest.tar
+    {
+        std::wstring cmd = L"cmd /c \"cd /d \"" + testDir + L"\" && \"" + sevenZip +
+                          L"\" a mytest.tgz mytest.tar\"";
+        int r = _wsystem(cmd.c_str());
+        assert(r == 0);
+    }
+
+    // 分析 .tgz — 只看外层（gzip 包裹一个 .tar），不需要递归解压内部 tar
+    ArchiveAnalysis a = ArchiveAnalyzer::Analyze(tgzPath, sevenZip);
+    std::wcout << L"  tgz analysis: fileCount=" << a.fileCount
+               << L" dirCount=" << a.dirCount
+               << L" topName=" << a.topName << std::endl;
+    std::cout << "  isSingleFile=" << a.isSingleFile()
+              << " isSingleFolder=" << a.isSingleFolder() << std::endl;
+
+    // 预期: 外层显示单个 mytest.tar 文件 → isSingleFile=true
+    // 7zG 会自动递归解压 gzip→tar→文件，无需在分析阶段解压整个 tgz
+    if (!a.isSingleFile()) {
+        std::cerr << "  FAIL: expected isSingleFile=true" << std::endl;
+        std::cerr << "  fileCount=" << a.fileCount << " dirCount=" << a.dirCount << std::endl;
+        // 清理
+        std::filesystem::remove(tarPath);
+        std::filesystem::remove(tgzPath);
+        std::filesystem::remove_all(testFolder);
+        std::exit(1);
+    }
+
+    // 清理
+    std::filesystem::remove(tarPath);
+    std::filesystem::remove(tgzPath);
+    std::filesystem::remove_all(testFolder);
+
+    std::cout << "test_tgz_analysis: PASS" << std::endl;
+}
+
 int main() {
     std::cout << "Running tests..." << std::endl;
     test_find_7z();
     test_find_7zg();
+    test_tgz_analysis();
     std::cout << "All tests passed!" << std::endl;
     return 0;
 }

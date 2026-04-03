@@ -8,7 +8,6 @@
 #include <shellapi.h>
 #include <sstream>
 #include <set>
-#include <algorithm>
 
 namespace SmartExtract {
 
@@ -43,6 +42,12 @@ static std::vector<std::pair<std::wstring, bool>> Parse7zListOutput(const std::s
     bool inEntries = false;
     while (std::getline(stream, line)) {
         // 跳过空行
+        if (line.empty()) continue;
+
+        // 移除末尾的 \r（7z输出可能是 \r\n 或 \r\r\n）
+        while (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
         if (line.empty()) continue;
 
         // 检测条目分隔线 "-------------------"
@@ -100,21 +105,12 @@ bool ArchiveAnalysis::isSingleFolder() const {
     return !topName.empty();
 }
 
-ArchiveAnalysis ArchiveAnalyzer::Analyze(const std::wstring& archivePath,
-                                          const std::wstring& sevenZipPath) {
-    ArchiveAnalysis result;
-
-    // 构建命令: 7z l -sccUTF-8 "archive.zip"
-    // 使用 -sccUTF-8 参数确保输出使用UTF-8编码，解决中文乱码问题
+// 执行 7z l 命令并返回输出
+static std::string Run7zList(const std::wstring& sevenZipPath, const std::wstring& archivePath) {
     std::wstring cmdLine = L"\"" + sevenZipPath + L"\" l -sccUTF-8 \"" + archivePath + L"\"";
-
-    // 创建管道捕获输出
     HANDLE hReadPipe = nullptr, hWritePipe = nullptr;
     SECURITY_ATTRIBUTES sa = {sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
-        result.fileCount = -1;
-        return result;
-    }
+    if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) return "";
 
     SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
@@ -125,27 +121,20 @@ ArchiveAnalysis ArchiveAnalyzer::Analyze(const std::wstring& archivePath,
     si.hStdError = hWritePipe;
 
     PROCESS_INFORMATION pi = {};
-
-    // 需要可修改的缓冲区
     std::vector<wchar_t> cmdBuf(cmdLine.begin(), cmdLine.end());
     cmdBuf.push_back(L'\0');
 
-    BOOL success = CreateProcessW(
-        nullptr, cmdBuf.data(), nullptr, nullptr,
-        TRUE, CREATE_NO_WINDOW, nullptr, nullptr,
-        &si, &pi
-    );
-
+    BOOL success = CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr,
+                                  TRUE, CREATE_NO_WINDOW, nullptr, nullptr,
+                                  &si, &pi);
     if (!success) {
         CloseHandle(hReadPipe);
         CloseHandle(hWritePipe);
-        result.fileCount = -1;
-        return result;
+        return "";
     }
 
     CloseHandle(hWritePipe);
 
-    // 读取输出
     std::string output;
     char buffer[4096];
     DWORD bytesRead;
@@ -154,9 +143,29 @@ ArchiveAnalysis ArchiveAnalyzer::Analyze(const std::wstring& archivePath,
     }
 
     CloseHandle(hReadPipe);
-    WaitForSingleObject(pi.hProcess, 5000);
+    WaitForSingleObject(pi.hProcess, 10000);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
+
+    return output;
+}
+
+ArchiveAnalysis ArchiveAnalyzer::Analyze(const std::wstring& archivePath,
+                                          const std::wstring& sevenZipPath) {
+    ArchiveAnalysis result;
+
+    // 先列出压缩包内容
+    std::string output = Run7zList(sevenZipPath, archivePath);
+    if (output.empty()) {
+        result.fileCount = -1;
+        return result;
+    }
+
+    // 对 compound 格式（.tar.gz/.tgz 等），7z l 只显示外层（如单个 .tar）。
+    // 不需要递归分析内部 tar——外层结果已经足够判断解压策略：
+    //   - 外层通常显示一个 .tar 文件 → isSingleFile() → 解压到当前目录
+    //   - 7zG x "file.tgz" 会自动递归解压（gzip→tar→文件），用户得到正确结果
+    // 递归分析内部 tar 需要解压整个 gzip 流，对于大文件（几GB）会极慢甚至卡死。
 
     // 解析输出
     auto entries = Parse7zListOutput(output);

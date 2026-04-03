@@ -19,6 +19,10 @@ Makefile
 
 # Test binaries
 test_analyzer.exe
+test_assert.cpp
+
+# Temp/patch files
+CMakeLists_test_patch.txt
 
 settings.local.json
 
