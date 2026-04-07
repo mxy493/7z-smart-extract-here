@@ -39,8 +39,7 @@ build\bin\test_analyzer.exe
 需要管理员权限，通过 `regsvr32` 注册 DLL。
 
 ```cmd
-dist\install.bat      # 注册
-dist\uninstall.bat    # 卸载
+dist\install.bat      # 卸载旧版并注册，需管理员权限
 ```
 
 ## 架构

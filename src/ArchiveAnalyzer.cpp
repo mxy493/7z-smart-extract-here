@@ -6,6 +6,8 @@
 #include "ArchiveAnalyzer.h"
 
 #include <shellapi.h>
+#include <algorithm>
+#include <random>
 #include <sstream>
 #include <set>
 
@@ -245,6 +247,63 @@ std::wstring ArchiveAnalyzer::FindSevenZipGUIPath(const std::wstring& sevenZipPa
         return guiPath;
     }
     return L"";
+}
+
+bool ArchiveAnalyzer::IsCompoundTarFormat(const std::wstring& archivePath) {
+    // compound tar 格式：外层是压缩层，内层是 tar
+    // 7z l 只能看到外层（一个 .tar 文件），需要两步解压
+    static const std::vector<std::wstring> compoundExts = {
+        L".tgz", L".tar.gz", L".tbz2", L".tar.bz2", L".txz", L".tar.xz"
+    };
+
+    std::wstring filename = std::filesystem::path(archivePath).filename().wstring();
+    std::transform(filename.begin(), filename.end(), filename.begin(), ::towlower);
+
+    for (const auto& ext : compoundExts) {
+        if (filename.size() > ext.size() &&
+            filename.compare(filename.size() - ext.size(), ext.size(), ext) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::wstring ArchiveAnalyzer::MakeTempTarPath(const std::filesystem::path& archiveFile) {
+    // 生成唯一临时文件名: 7z_smart_extract_<filename>_<随机数>.tar
+    std::wstring stem = archiveFile.stem().wstring();
+
+    std::random_device rd;
+    std::uniform_int_distribution<int> dist(100000, 999999);
+    int rand = dist(rd);
+
+    wchar_t buf[32];
+    swprintf_s(buf, L"_%06d", rand);
+
+    std::wstring tempName = L"7z_smart_extract_" + stem + buf + L".tar";
+    return (std::filesystem::temp_directory_path() / tempName).wstring();
+}
+
+bool RunProcessAndWait(const std::wstring& cmdLine) {
+    std::vector<wchar_t> cmdBuf(cmdLine.begin(), cmdLine.end());
+    cmdBuf.push_back(L'\0');
+
+    STARTUPINFOW si = {sizeof(STARTUPINFOW)};
+    PROCESS_INFORMATION pi = {};
+
+    BOOL ok = CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr,
+                             FALSE, 0, nullptr, nullptr, &si, &pi);
+    if (!ok) return false;
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+
+    DWORD exitCode = 0;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    // 7z 退出码: 0=成功, 1=警告(解压完成但有非致命问题), 2=致命错误
+    return exitCode < 2;
 }
 
 } // namespace SmartExtract

@@ -13,6 +13,13 @@ std::pair<std::wstring, bool> ConflictHandler::ComputeExtractDir(const std::wstr
     std::filesystem::path archiveFile(archivePath);
     std::wstring parentDir = archiveFile.parent_path().wstring();
 
+    if (ArchiveAnalyzer::IsCompoundTarFormat(archivePath)) {
+        // compound tar 格式：无法在不解压的情况下知道内层结构
+        // 保守处理：按"可能有多文件"对待，目标为同名子目录
+        // 实际解压时会根据内层分析结果决定最终目录
+        return {(std::filesystem::path(parentDir) / archiveFile.stem()).wstring(), true};
+    }
+
     // 需要分析压缩包内容来决定目标路径
     std::wstring sevenZipPath = ArchiveAnalyzer::FindSevenZipPath();
     if (sevenZipPath.empty()) {

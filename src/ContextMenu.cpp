@@ -7,6 +7,8 @@
 #include <strsafe.h>
 #include <algorithm>
 #include <filesystem>
+#include <thread>
+#include <random>
 
 namespace SmartExtract {
 
@@ -132,45 +134,110 @@ STDMETHODIMP ContextMenu::InvokeCommand(CMINVOKECOMMANDINFO* pici) {
         std::filesystem::path archiveFile(archivePath);
         std::wstring destDir = archiveFile.parent_path().wstring();
 
-        // 分析压缩包内容
-        ArchiveAnalysis analysis = ArchiveAnalyzer::Analyze(archivePath, sevenZipPath);
+        if (ArchiveAnalyzer::IsCompoundTarFormat(archivePath)) {
+            // compound tar 格式：需要两步解压，放后台线程
+            // 捕获所有需要的值（非引用），因为 InvokeCommand 会返回
+            std::thread([archivePath, archiveFile, destDir,
+                         sevenZipPath, sevenZipGUI]() {
+                // 1. 生成临时 .tar 路径
+                std::wstring tempTar = ArchiveAnalyzer::MakeTempTarPath(archiveFile);
 
-        // 确定解压目标路径
-        std::wstring extractDir;
-        if (analysis.fileCount < 0) {
-            extractDir = destDir; // 分析失败，解压到当前目录
-        } else if (analysis.isSingleFile()) {
-            extractDir = destDir; // 单文件：当前目录
-        } else if (analysis.isSingleFolder()) {
-            extractDir = destDir; // 单文件夹：当前目录
+                // 2. 外层解压到临时目录（用 7zG 显示进度）
+                std::wstring outerCmd = L"\"" + sevenZipGUI +
+                                        L"\" x \"" + archivePath +
+                                        L"\" -o\"" + std::filesystem::path(tempTar).parent_path().wstring() +
+                                        L"\" -y";
+                if (!SmartExtract::RunProcessAndWait(outerCmd)) {
+                    return; // 外层解压失败
+                }
+
+                // 3. 临时 .tar 可能文件名不是我们指定的（7z 按压缩包内名称解压）
+                // 在临时目录中查找 .tar 文件
+                std::filesystem::path tempDir = std::filesystem::path(tempTar).parent_path();
+                std::wstring actualTar;
+                for (const auto& entry : std::filesystem::directory_iterator(tempDir)) {
+                    if (entry.is_regular_file()) {
+                        std::wstring fname = entry.path().filename().wstring();
+                        std::transform(fname.begin(), fname.end(), fname.begin(), ::towlower);
+                        if (fname.size() >= 4 && fname.substr(fname.size() - 4) == L".tar") {
+                            actualTar = entry.path().wstring();
+                            break;
+                        }
+                    }
+                }
+                if (actualTar.empty()) {
+                    return; // 没找到 .tar 文件
+                }
+
+                // 4. 分析内层 .tar 决定解压策略
+                ArchiveAnalysis innerAnalysis = ArchiveAnalyzer::Analyze(actualTar, sevenZipPath);
+
+                std::wstring extractDir;
+                if (innerAnalysis.fileCount < 0) {
+                    extractDir = destDir;
+                } else if (innerAnalysis.isSingleFile()) {
+                    extractDir = destDir;
+                } else if (innerAnalysis.isSingleFolder()) {
+                    extractDir = destDir;
+                } else {
+                    extractDir = (std::filesystem::path(destDir) / archiveFile.stem()).wstring();
+                }
+
+                // 5. 内层解压到目标目录（用 7zG 显示进度）
+                std::wstring innerCmd = L"\"" + sevenZipGUI +
+                                        L"\" x \"" + actualTar +
+                                        L"\" -o\"" + extractDir +
+                                        L"\" -y";
+                SmartExtract::RunProcessAndWait(innerCmd);
+
+                // 6. 清理临时文件和目录
+                std::error_code ec;
+                std::filesystem::remove(actualTar, ec);
+                std::filesystem::remove(tempDir, ec);
+            }).detach();
         } else {
-            // 多文件/多目录：解压到同名子目录
-            extractDir = (std::filesystem::path(destDir) / archiveFile.stem()).wstring();
-        }
+            // 普通格式：分析后直接解压（fire-and-forget）
 
-        // 构建7zG命令行: 7zG.exe x "archive.zip" -o"destDir" -y
-        std::wstring cmdLine = L"\"" + sevenZipGUI +
-                               L"\" x \"" + archivePath +
-                               L"\" -o\"" + extractDir +
-                               L"\" -y";
+            // 分析压缩包内容
+            ArchiveAnalysis analysis = ArchiveAnalyzer::Analyze(archivePath, sevenZipPath);
 
-        std::vector<wchar_t> cmdBuf(cmdLine.begin(), cmdLine.end());
-        cmdBuf.push_back(L'\0');
+            // 确定解压目标路径
+            std::wstring extractDir;
+            if (analysis.fileCount < 0) {
+                extractDir = destDir; // 分析失败，解压到当前目录
+            } else if (analysis.isSingleFile()) {
+                extractDir = destDir; // 单文件：当前目录
+            } else if (analysis.isSingleFolder()) {
+                extractDir = destDir; // 单文件夹：当前目录
+            } else {
+                // 多文件/多目录：解压到同名子目录
+                extractDir = (std::filesystem::path(destDir) / archiveFile.stem()).wstring();
+            }
 
-        STARTUPINFOW si = {sizeof(STARTUPINFOW)};
-        PROCESS_INFORMATION pi = {};
+            // 构建7zG命令行: 7zG.exe x "archive.zip" -o"destDir" -y
+            std::wstring cmdLine = L"\"" + sevenZipGUI +
+                                   L"\" x \"" + archivePath +
+                                   L"\" -o\"" + extractDir +
+                                   L"\" -y";
 
-        BOOL ok = CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr,
-                                 FALSE, 0, nullptr, nullptr, &si, &pi);
-        if (ok) {
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
-            // 不等待，让7zG自己显示进度窗口
-        } else {
-            wchar_t title[64] = {};
-            LoadStringW(g_hInstance, IDS_ERROR_TITLE, title, ARRAYSIZE(title));
-            std::wstring errMsg = L"启动7-Zip失败: " + archiveFile.filename().wstring();
-            MessageBoxW(pici->hwnd, errMsg.c_str(), title, MB_ICONERROR);
+            std::vector<wchar_t> cmdBuf(cmdLine.begin(), cmdLine.end());
+            cmdBuf.push_back(L'\0');
+
+            STARTUPINFOW si = {sizeof(STARTUPINFOW)};
+            PROCESS_INFORMATION pi = {};
+
+            BOOL ok = CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr,
+                                     FALSE, 0, nullptr, nullptr, &si, &pi);
+            if (ok) {
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                // 不等待，让7zG自己显示进度窗口
+            } else {
+                wchar_t title[64] = {};
+                LoadStringW(g_hInstance, IDS_ERROR_TITLE, title, ARRAYSIZE(title));
+                std::wstring errMsg = L"启动7-Zip失败: " + archiveFile.filename().wstring();
+                MessageBoxW(pici->hwnd, errMsg.c_str(), title, MB_ICONERROR);
+            }
         }
     }
 

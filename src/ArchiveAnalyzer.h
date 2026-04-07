@@ -29,6 +29,17 @@ public:
 
     // 查找7zG.exe路径（基于7z.exe路径推导）
     static std::wstring FindSevenZipGUIPath(const std::wstring& sevenZipPath);
+
+    // 判断是否为 compound tar 格式（.tgz/.tar.gz/.tbz2/.tar.bz2/.txz/.tar.xz）
+    // 这类格式 7z l 只能看到外层，需要两步解压
+    static bool IsCompoundTarFormat(const std::wstring& archivePath);
+
+    // 生成 compound 格式外层解压的临时 .tar 路径
+    // 路径格式: %TEMP%\7z_smart_extract_<filename>_<随机数>.tar
+    static std::wstring MakeTempTarPath(const std::filesystem::path& archiveFile);
 };
+
+// 启动进程并等待结束，返回是否成功启动且退出码为0
+bool RunProcessAndWait(const std::wstring& cmdLine);
 
 } // namespace SmartExtract

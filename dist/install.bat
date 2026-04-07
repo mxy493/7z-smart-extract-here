@@ -14,6 +14,9 @@ if not exist "%DLL_PATH%" (
     exit /b 1
 )
 
+echo Unregistering old version (if any)...
+regsvr32 /u /s "%DLL_PATH%"
+
 echo Registering: %DLL_PATH%
 regsvr32 "%DLL_PATH%"
 if %errorlevel% equ 0 (
@@ -21,4 +24,9 @@ if %errorlevel% equ 0 (
 ) else (
     echo Install failed. Error code: %errorlevel%
 )
+
+echo.
+echo Please restart Explorer for changes to take effect.
+echo   - Run:  taskkill /f /im explorer.exe ^&^& start explorer.exe
+echo.
 pause
