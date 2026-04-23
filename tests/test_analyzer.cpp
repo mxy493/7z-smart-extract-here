@@ -94,11 +94,67 @@ void test_tgz_analysis() {
     std::cout << "test_tgz_analysis: PASS" << std::endl;
 }
 
+void test_multi_entry_tar() {
+    std::wstring sevenZip = ArchiveAnalyzer::FindSevenZipPath();
+    if (sevenZip.empty()) {
+        std::cout << "test_multi_entry_tar: SKIP (7z not found)" << std::endl;
+        return;
+    }
+
+    // 创建包含多个顶层条目的目录结构
+    std::wstring testDir = L"C:\\temp\\test_multi_entry_tar";
+    std::filesystem::create_directories(testDir);
+
+    // 多个子目录 + 文件
+    std::filesystem::create_directories(testDir + L"\\mca_log");
+    {
+        std::ofstream ofs(testDir + L"\\mca_log\\test.log");
+        ofs << "mca data";
+    }
+    std::filesystem::create_directories(testDir + L"\\charge_log");
+    {
+        std::ofstream ofs(testDir + L"\\charge_log\\test.log");
+        ofs << "charge data";
+    }
+    {
+        std::ofstream ofs(testDir + L"\\data.csv");
+        ofs << "csv data";
+    }
+
+    std::wstring tarPath = testDir + L"\\multi_entry.tar";
+
+    // 7z a multi_entry.tar mca_log charge_log data.csv
+    {
+        std::wstring cmd = L"cmd /c \"cd /d \"" + testDir + L"\" && \"" + sevenZip +
+                          L"\" a multi_entry.tar mca_log charge_log data.csv\"";
+        int r = _wsystem(cmd.c_str());
+        assert(r == 0);
+    }
+
+    ArchiveAnalysis a = ArchiveAnalyzer::Analyze(tarPath, sevenZip);
+    std::wcout << L"  multi_entry tar analysis: fileCount=" << a.fileCount
+               << L" dirCount=" << a.dirCount
+               << L" topName=[" << a.topName << L"]" << std::endl;
+    std::cout << "  isSingleFile=" << a.isSingleFile()
+              << " isSingleFolder=" << a.isSingleFolder() << std::endl;
+
+    // 多个顶层条目：不应视为单文件夹
+    assert(!a.isSingleFile());
+    assert(!a.isSingleFolder());
+
+    // 清理
+    std::filesystem::remove(tarPath);
+    std::filesystem::remove_all(testDir);
+
+    std::cout << "test_multi_entry_tar: PASS" << std::endl;
+}
+
 int main() {
     std::cout << "Running tests..." << std::endl;
     test_find_7z();
     test_find_7zg();
     test_tgz_analysis();
+    test_multi_entry_tar();
     std::cout << "All tests passed!" << std::endl;
     return 0;
 }

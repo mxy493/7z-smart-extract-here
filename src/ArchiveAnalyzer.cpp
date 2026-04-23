@@ -86,13 +86,18 @@ static std::vector<std::pair<std::wstring, bool>> Parse7zListOutput(const std::s
     return entries;
 }
 
-// 提取顶层名称
+// 提取顶层名称（跳过 ./ 或 .\ 前缀）
 static std::wstring GetTopLevelName(const std::wstring& path) {
     // 移除末尾的/
     std::wstring p = path;
     while (!p.empty() && (p.back() == L'/' || p.back() == L'\\')) {
         p.pop_back();
     }
+    // 跳过 ./ 或 .\ 前缀（tar 文件常用此格式）
+    if (p.size() >= 2 && p[0] == L'.' && (p[1] == L'/' || p[1] == L'\\')) {
+        p = p.substr(2);
+    }
+    if (p.empty()) return L"";
     // 取第一个路径段
     size_t pos = p.find_first_of(L"/\\");
     if (pos != std::wstring::npos) {
